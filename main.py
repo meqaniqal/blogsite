@@ -15,6 +15,8 @@ from forms import CreatePostForm, RegisterForm, LoginForm, CommentForm
 # substitute for Gravatar library, since Gravitar does not yet support flask 3.00:
 import hashlib
 
+# to serve the app from main.py, make a Procfile that contains: web: gunicorn main:app
+
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('FLASK_KEY')
 print(app.config['SECRET_KEY'])

@@ -1,8 +1,11 @@
 from datetime import date
+from typing import List
 import os
-# this is for admin-only decorator:
-from functools import wraps
-from flask import Flask, abort, render_template, redirect, url_for, flash, request,Response
+from flask_wtf import csrf
+from flask_wtf.csrf import CSRFProtect # necessary for login to create a correct CSRF after session clear
+
+
+from flask import Flask, abort, render_template, redirect, url_for, flash, request,session,Response
 from flask_bootstrap import Bootstrap5
 from flask_ckeditor import CKEditor
 from flask_login import UserMixin, login_user, LoginManager, current_user, logout_user
@@ -12,12 +15,17 @@ from sqlalchemy import Integer, String, Text, select, ForeignKey
 from werkzeug.security import generate_password_hash, check_password_hash
 # Import your forms from the forms.py
 from forms import CreatePostForm, RegisterForm, LoginForm, CommentForm
-# substitute for Gravatar library, since Gravitar does not yet support flask 3.00:
+# for gravatar library substitute:
 import hashlib
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ.get('FLASK_KEY')
-print(app.config['SECRET_KEY'])
+# enable CSRF protection for this app so wtforms don't cause CSRF mismatch errors
+csrfprotect=CSRFProtect(app)
+app.config['WTF_CSRF_ENABLED'] = True
+FLASK_KEY = os.environ.get('FLASK_KEY')
+print(FLASK_KEY)
+#app.config['SECRET_KEY'] = FLASK_KEY
+app.config['SECRET_KEY']='8BYkEfBA6O6donzWlSihBXox7C0sKR6b'
 ckeditor = CKEditor(app)
 Bootstrap5(app)
 
@@ -26,7 +34,7 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 
 
-
+# substitute for Gravatar library, since Gravitar does not yet support flask 3.00:
 def gravatar_url(email, size=100, rating='g', default='retro', force_default=False):
     hash_value = hashlib.md5(email.lower().encode('utf-8')).hexdigest()
     return f"https://www.gravatar.com/avatar/{hash_value}?s={size}&d={default}&r={rating}&f={force_default}"
@@ -35,22 +43,10 @@ def gravatar_url(email, size=100, rating='g', default='retro', force_default=Fal
 class Base(DeclarativeBase):
     pass
 
-# set absolute directory for the database
-basedir = os.path.abspath(os.path.dirname(__file__))
-instance_path = os.path.join(basedir, 'instance')
-# Create the 'instance' directory if it doesn't exist
-os.makedirs(instance_path, exist_ok=True)
-db_path = os.path.join(instance_path, 'posts.db')
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///'+db_path
-
-# the following line can break if switching between run configurations in pycharm, so the above lines
-# set the uri to the absolute path of the instance folder.
-#app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///posts.db'
-
 db = SQLAlchemy(model_class=Base)
-db.init_app(app)
 
-
+#app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DB_URI', 'sqlite:///posts.db')
+app.config['SQLALCHEMY_DATABASE_URI']='sqlite:///posts.db'
 
 # CONFIGURE TABLES
 class User(UserMixin, db.Model):
@@ -91,26 +87,67 @@ class Comment(db.Model):
 
 
 
+
+
+# Close any existing database connections
+#db.engine.dispose()
+
+# Create a new database connection
+#db = SQLAlchemy(app)
+
+
+db.init_app(app)
+
+
+
+
+
+
 with app.app_context():
+    db.metadata.bind = db.engine
     db.create_all()
-    # uncomment on first run to create the database and an admin user
-    first_user_email=os.environ.get('FIRST_USER_EMAIL')
-    first_user_password=os.environ.get('FIRST_USER_PASSWORD')
-    print(first_user_email,first_user_password)
-    """admin_user=User(email=first_user_email,
-                    password=generate_password_hash(first_user_password,method='pbkdf2:sha256', salt_length=8),
+    """admin_user=User(email="admin@example.com",
+                    password=generate_password_hash("1234",method='pbkdf2:sha256', salt_length=8),
                     name="admin")
     db.session.add(admin_user)
     db.session.commit()"""
 
-#cmd-opt-R does hard refresh to hopefully reset user_id
+
+# cmd-opt-R does hard refresh to hopefully reset user_id
+"""@login_manager.user_loader
+def load_user(user_id):
+    #user_id=1
+    print(f"user_id:{user_id}")
+    # If due to deleting or switching out db, user_id printed above is stuck on whatever the browser
+    # remembers last, you can replace user_id below with the user id you want the page to assume
+    # you can use db editor to switch user ids to move the user whose password you know to admin user.
+    # return None
+    user = db.get_or_404(User, user_id)
+    print(f"User object: {user}")
+    return user
+
+    #print('blogpostid#1:',db.session.execute(select(BlogPost).where(BlogPost.id==1)).scalar())
+    #return db.get_or_404(User, user_id)"""
+
+@app.route('/print_users')
+def print_users():
+    users = db.session.query(User).all()
+    userstring=str(users)
+    for user in users:
+        userstring+=f"User ID: {user.id}, Email: {user.email}, Name: {user.name}"
+    return Response(userstring)
+
 @login_manager.user_loader
 def load_user(user_id):
-    return db.get_or_404(User, user_id)
+    user = db.session.query(User).get(user_id)
+    if user:
+        print(f"User object: {user}")
+        return user
+    else:
+        print(f"No user found with ID {user_id}")
+        return None
 
-
-
-
+# TODO: Use Werkzeug to hash the user's password when creating a new user.
 @app.route('/register', methods=['POST', 'GET'])
 def register():
     logout_user()
@@ -136,16 +173,19 @@ def register():
 
 @app.route('/login', methods=['POST', 'GET'])
 def login():
-    logout_user()
+
+    session.clear()
+    csrf.generate_csrf()  # Generate a new CSRF token (necessary after session.clear()
     email = request.args.get('email')
+    #print('In login. value of form before making a blank form:', email)
     form = LoginForm()
     if email:
         form = LoginForm(email=email)
-
+    #print(f"Form validated: {form.validate_on_submit()}")
     if form.validate_on_submit():
         email = request.form.get('email')
         user = db.session.execute(select(User).where(User.email == email)).scalar()
-
+        print('User:',user)
         if user is None:
             flash('User not found', 'error')
             return redirect(url_for('login', form=form))
@@ -156,7 +196,7 @@ def login():
         if not pwd_correct:
             flash('Password incorrect', 'error')
             return redirect(url_for('login', form=form))
-        login_user(user, remember=True)
+        login_user(user)
 
         flash('Login Successful', 'success')
         return redirect(url_for('get_all_posts', user_id=current_user.id))
@@ -165,7 +205,9 @@ def login():
 
 @app.route('/logout')
 def logout():
+    print(f"Value of current_user.id: {current_user.id if current_user.is_authenticated else 'Anonymous'}")
     logout_user()
+    session.clear()
     flash('You have been logged out.', 'success')
     return redirect(url_for('get_all_posts'))
 
@@ -175,13 +217,16 @@ def get_all_posts():
     # current_user is automatically accessible in templates, so look in the template for the code that tests the
     # user id to see if it is 1, which is the first registered user,
     # which we have decided to specify as having special priveleges
+    logout_user()
+    print('Is authenticated?')
+    print(current_user.is_authenticated)
     result = db.session.execute(db.select(BlogPost))
     posts = result.scalars().all()
     return render_template("index.html", all_posts=posts, current_user=current_user)
 
 
-
-@app.route("/post/<int:post_id>",methods=["GET", "POST"])
+# TODO: Allow logged-in users to comment on posts
+@app.route("/post/<int:post_id>", methods=["GET", "POST"])
 def show_post(post_id):
     requested_post = db.get_or_404(BlogPost, post_id)
     form = CommentForm()
@@ -190,36 +235,24 @@ def show_post(post_id):
         if not current_user.is_authenticated:
             flash("You need to login or register to comment.")
             return redirect(url_for("login"))
-        comment=Comment(comment_author=current_user,parent_post=requested_post,text=form.comment.data)
+        comment = Comment(comment_author=current_user, parent_post=requested_post, text=form.comment.data)
 
         db.session.add(comment)
         db.session.commit()
     # compile a list (set) of unique commenters to get gravatar images for
-    commenter_set=set()
+    commenter_set = set()
     for comment_i in requested_post.comments:
-        author=comment_i.comment_author
-        commenter_set.add((author.name,author.email))
+        author = comment_i.comment_author
+        commenter_set.add((author.name, author.email))
     # create a dict of commenter usernames and a gravatar logo based on their email:
-    commenters={item[0]: gravatar_url(item[1]) for item in commenter_set}
-    print("commenters",commenters)
+    commenters = {item[0]: gravatar_url(item[1]) for item in commenter_set}
+    print("commenters", commenters)
 
-    return render_template("post.html", post=requested_post, form=form,gravatars=commenters)
+    return render_template("post.html", post=requested_post, form=form, gravatars=commenters)
 
-# Create an admin-only decorator
-def admin_only(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        # If id is not 1 then return abort with 403 error
-        if current_user.id != 1:
-            return abort(403)
-        # Otherwise continue with the route function
-        return f(*args, **kwargs)
-
-    return decorated_function
 
 # TODO: Use a decorator so only an admin user can create a new post
 @app.route("/new-post", methods=["GET", "POST"])
-@admin_only
 def add_new_post():
     form = CreatePostForm()
     if form.validate_on_submit():
@@ -280,4 +313,5 @@ def contact():
 
 if __name__ == "__main__":
 
-    app.run(debug=False, port=5002)
+    app.run(debug=True, port=5002)
+    print(current_user)

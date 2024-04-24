@@ -1,0 +1,3 @@
+Had to go to Pycharm>Settings>Directory mappings to eliminate the previous git associations and since I used terminal
+for git operations on the directory for this website project, I had to add this directory from the list of unregistered
+directories.

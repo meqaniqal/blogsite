@@ -15,10 +15,17 @@ from forms import CreatePostForm, RegisterForm, LoginForm, CommentForm
 # substitute for Gravatar library, since Gravitar does not yet support flask 3.00:
 import hashlib
 
+# render.com env var version of FLASK_KEY: SHo9nhBXox7C0sKR68BYkfBA6O6donzW
+
 # create blogsite repo, then locally run these cmds:
 # git remote add origin https://github.com/meqaniqal/blogsite.git
 # git branch -M main
 # git push -u origin main
+# to remove files/folders I forgot to add to .gitignore until after commit:
+# git rm --cached -r <file or folder name>, for each file/folder I want to remove from the repo
+# --cached means to remove from the index that will tell what to have on the remote, but not to remove
+# the file from the local git
+# commit the file and push it.
 
 # to serve the app from main.py, make a Procfile that contains: web: gunicorn main:appgit
 
@@ -49,6 +56,13 @@ instance_path = os.path.join(basedir, 'instance')
 os.makedirs(instance_path, exist_ok=True)
 db_path = os.path.join(instance_path, 'posts.db')
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///'+db_path
+
+# this is so that using postgresql
+env_db_uri=os.environ.get('DB_URI')
+if env_db_uri:
+    app.config['SQLALCHEMY_DATABASE_URI'] =env_db_uri
+    print('using env var for db')
+
 
 # the following line can break if switching between run configurations in pycharm, so the above lines
 # set the uri to the absolute path of the instance folder.

@@ -62,7 +62,7 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///'+db_path
 env_db_uri=os.environ.get('DB_URI')
 if env_db_uri:
     app.config['SQLALCHEMY_DATABASE_URI'] =env_db_uri
-    print('using env var for db')
+    print('using env var for db:',env_db_uri)
 
 
 # the following line can break if switching between run configurations in pycharm, so the above lines

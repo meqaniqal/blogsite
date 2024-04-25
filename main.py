@@ -15,7 +15,12 @@ from forms import CreatePostForm, RegisterForm, LoginForm, CommentForm
 # substitute for Gravatar library, since Gravitar does not yet support flask 3.00:
 import hashlib
 
-# to serve the app from main.py, make a Procfile that contains: web: gunicorn main:app
+# create blogsite repo, then locally run these cmds:
+# git remote add origin https://github.com/meqaniqal/blogsite.git
+# git branch -M main
+# git push -u origin main
+
+# to serve the app from main.py, make a Procfile that contains: web: gunicorn main:appgit
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('FLASK_KEY')

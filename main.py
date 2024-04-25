@@ -1,6 +1,6 @@
 from datetime import date
 import os
-import psycopg
+import psycopg2
 # this is for admin-only decorator:
 from functools import wraps
 from flask import Flask, abort, render_template, redirect, url_for, flash, request,Response

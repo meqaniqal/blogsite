@@ -1,15 +1,19 @@
 from datetime import date
 import os
-import psycopg2
+#import psycopg2
 # this is for admin-only decorator:
 from functools import wraps
-from flask import Flask, abort, render_template, redirect, url_for, flash, request,Response
+# added import of 'session' to use to clear session if creating new database
+from flask import Flask, abort, render_template, redirect, url_for, flash, request,Response,session
 from flask_bootstrap import Bootstrap5
 from flask_ckeditor import CKEditor
 from flask_login import UserMixin, login_user, LoginManager, current_user, logout_user
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import relationship, DeclarativeBase, Mapped, mapped_column
-from sqlalchemy import Integer, String, Text, select, ForeignKey
+# create_engine, inspect, and text are for the code that checks whether a postgresql db exists and
+# to initialize the database if not. OperationalError is also needed for this.
+from sqlalchemy import Integer, String, Text, select, ForeignKey, create_engine, inspect,text
+from sqlalchemy.exc import OperationalError
 from werkzeug.security import generate_password_hash, check_password_hash
 # Import your forms from the forms.py
 from forms import CreatePostForm, RegisterForm, LoginForm, CommentForm
@@ -58,7 +62,7 @@ os.makedirs(instance_path, exist_ok=True)
 db_path = os.path.join(instance_path, 'posts.db')
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///'+db_path
 
-# this is so that using postgresql
+# this is so render.com can use a postgresql URI instead of
 env_db_uri=os.environ.get('DB_URI')
 if env_db_uri:
     app.config['SQLALCHEMY_DATABASE_URI'] =env_db_uri
@@ -70,6 +74,36 @@ if env_db_uri:
 #app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///posts.db'
 
 db = SQLAlchemy(model_class=Base)
+
+# Create a database engine using the database URI
+engine = create_engine(app.config['SQLALCHEMY_DATABASE_URI'])
+
+# Get the database name from the URI
+database_name = app.config['SQLALCHEMY_DATABASE_URI'].split('/')[-1]
+print('database_name:',database_name)
+
+# Check if the database exists
+if app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite'):
+    # For SQLite databases, check if the file exists
+    database_exists = os.path.isfile(database_name)
+else:
+    # For other databases (e.g., PostgreSQL), use the inspect function
+    inspector = inspect(engine)
+    database_exists = database_name in inspector.get_schema_names()
+
+
+if database_exists:
+    print(f"Database {database_name} already exists.")
+else:
+    try:
+        # Create the database
+        conn = engine.connect()
+        conn.execute(text(f"CREATE DATABASE {database_name};"))
+        conn.close()
+        print(f"Database {database_name} created successfully.")
+    except OperationalError as e:
+        print(f"Error creating the database {database_name}:", e)
+
 db.init_app(app)
 
 
@@ -111,23 +145,48 @@ class Comment(db.Model):
     parent_post = relationship("BlogPost", back_populates="comments")
     text: Mapped[str] = mapped_column(Text, nullable=False)
 
+def print_users():
+    users = db.session.query(User).all()
+    print(users)
+    for user in users:
+         print('userid:',user.id,'email:',user.email)
 
 
 with app.app_context():
-    db.create_all()
+
     # uncomment on first run to create the database and an admin user
     first_user_email=os.environ.get('FIRST_USER_EMAIL')
     first_user_password=os.environ.get('FIRST_USER_PASSWORD')
-    print(first_user_email,first_user_password)
-    """admin_user=User(email=first_user_email,
-                    password=generate_password_hash(first_user_password,method='pbkdf2:sha256', salt_length=8),
-                    name="admin")
-    db.session.add(admin_user)
-    db.session.commit()"""
+    # if not supplied by environment, create an easy to remember admin user
+    if not first_user_email or not first_user_password:
+        first_user_email="admin@example.com"
+        first_user_password="1234"
+    # Get the database file path
+    database_path = os.path.join(app.instance_path, 'posts.db')
+    print('database_path:',database_path)
+    # Check if the file exists
+    # database_exists = os.path.exists(database_path)
+    # print('database exists?',database_exists)
+    if not database_exists:
+        db.create_all()
+        admin_user=User(email=first_user_email,
+                        password=generate_password_hash(first_user_password,method='pbkdf2:sha256', salt_length=8),
+                        name="admin")
+        db.session.add(admin_user)
+        db.session.commit()
+        print_users()
 
-#cmd-opt-R does hard refresh to hopefully reset user_id
+
 @login_manager.user_loader
 def load_user(user_id):
+    print('in load_user. User_id:',user_id)
+    # if user_id hasn't been reset upon a database reset, this will detect that and remove
+    user=db.session.get(User, user_id)
+    print('User with that id:',user)
+    if user==None:
+        # Clear the user's session data
+        session.clear()
+        return None
     return db.get_or_404(User, user_id)
 
 
@@ -166,8 +225,15 @@ def login():
 
     if form.validate_on_submit():
         email = request.form.get('email')
-        user = db.session.execute(select(User).where(User.email == email)).scalar()
-
+        print('In login, users found:')
+        print_users()
+        print('email entered from form:',email)
+        # this with block is to keep the session from being wiped when using db.session.execute.
+        with db.session.no_autoflush:
+            user = db.session.scalar(select(User).where(User.email == email))
+            #user = db.session.execute(select(User).where(User.email == email)).scalar()
+        print('user searched for in db:')
+        print('email',user.email,'id:',user.id)
         if user is None:
             flash('User not found', 'error')
             return redirect(url_for('login', form=form))
@@ -302,4 +368,4 @@ def contact():
 
 if __name__ == "__main__":
 
-    app.run(debug=False, port=5002)
+    app.run(debug=True, port=5002)

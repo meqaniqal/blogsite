@@ -67,21 +67,42 @@ env_db_uri=os.environ.get('DB_URI')
 if env_db_uri:
     app.config['SQLALCHEMY_DATABASE_URI'] =env_db_uri
     print('using env var for db:',env_db_uri)
-else:
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///posts.db'
+
+
+# the following line can break if switching between run configurations in pycharm, so the above lines
+# set the uri to the absolute path of the instance folder.
+#app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///posts.db'
 
 db = SQLAlchemy(model_class=Base)
 
 # Create a database engine using the database URI
-#engine = create_engine(app.config['SQLALCHEMY_DATABASE_URI'])
+engine = create_engine(app.config['SQLALCHEMY_DATABASE_URI'])
 
 # Get the database name from the URI
+database_name = app.config['SQLALCHEMY_DATABASE_URI'].split('/')[-1]
+print('database_name:',database_name)
+
+# Check if the database exists
+if app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite'):
+    # For SQLite databases, check if the file exists
+    database_exists = os.path.isfile(database_name)
+else:
+    # For other databases (e.g., PostgreSQL), use the inspect function
+    inspector = inspect(engine)
+    database_exists = database_name in inspector.get_schema_names()
 
 
-
-
-
-
+if database_exists:
+    print(f"Database {database_name} already exists.")
+else:
+    try:
+        # Create the database
+        conn = engine.connect()
+        conn.execute(text(f"CREATE DATABASE {database_name};"))
+        conn.close()
+        print(f"Database {database_name} created successfully.")
+    except OperationalError as e:
+        print(f"Error creating the database {database_name}:", e)
 
 db.init_app(app)
 
@@ -143,20 +164,17 @@ with app.app_context():
     # Get the database file path
     database_path = os.path.join(app.instance_path, 'posts.db')
     print('database_path:',database_path)
-    db.create_all()
-    # this tests if there is a user with userid 1, which is used to decide whether or not to
-    # create a first user.
-
-    user_data_exists=db.session.query(db.exists().where(User.id == 1)).scalar()
-    print('User_data_exists?',user_data_exists)
-    if not user_data_exists:
-        print('no user data yet.')
-        """admin_user=User(email=first_user_email,
+    # Check if the file exists
+    # database_exists = os.path.exists(database_path)
+    # print('database exists?',database_exists)
+    if not database_exists:
+        db.create_all()
+        admin_user=User(email=first_user_email,
                         password=generate_password_hash(first_user_password,method='pbkdf2:sha256', salt_length=8),
                         name="admin")
         db.session.add(admin_user)
         db.session.commit()
-        print_users()"""
+        print_users()
 
 
 @login_manager.user_loader
